@@ -1,0 +1,484 @@
+{
+  "name": "HealthCare",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 4
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -688,
+        -80
+      ],
+      "id": "9bb6b592-b9d3-482c-9f2c-f779451f243f",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  customer_id,\n  first_name,\n  last_name,\n  email\nFROM customer\nWHERE email IS NULL OR email = '';\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        288,
+        -304
+      ],
+      "id": "f3c733c9-682f-44c8-aa76-ede0f2ff6dd6",
+      "name": "DQ – Missing Emails",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "0sWI5TG8R6n00crB",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  payment_id,\n  customer_id,\n  amount,\n  payment_date\nFROM payment\nWHERE amount <= 0\n   OR amount > 100;\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        288,
+        -80
+      ],
+      "id": "5a6fe8be-e6a6-4ecb-b2fe-2b60d529c205",
+      "name": "DQ – Suspicious Payments",
+      "credentials": {
+        "postgres": {
+          "id": "0sWI5TG8R6n00crB",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n    c.customer_id,\n    (c.first_name || ' ' || c.last_name) AS full_name,\n    SUM(p.amount) AS total_payments\nFROM customer c\nJOIN payment p ON p.customer_id = c.customer_id\nGROUP BY c.customer_id, full_name\nORDER BY total_payments DESC;\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -208,
+        -80
+      ],
+      "id": "256cc1c9-aee8-4d12-a52b-0ae81c7fc1b3",
+      "name": "Extract",
+      "credentials": {
+        "postgres": {
+          "id": "0sWI5TG8R6n00crB",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO customer_revenue_summary (customer_id, full_name, total_payments, last_updated)\nVALUES ({{ $json.customer_id }}, '{{ $json.full_name }}', {{ $json.total_payments }}, NOW())ON CONFLICT (customer_id)\nDO UPDATE SET\n  full_name = EXCLUDED.full_name,\n  total_payments = EXCLUDED.total_payments,\n  last_updated = NOW();",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        -80
+      ],
+      "id": "df8ff88b-5a9d-4c05-92e6-ea027acd3a2c",
+      "name": "Load",
+      "executeOnce": false,
+      "credentials": {
+        "postgres": {
+          "id": "0sWI5TG8R6n00crB",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO data_quality_issues (issue_type, details)\nVALUES (\n  'MISSING_EMAIL',\n  to_jsonb('{{ $json | json }}'::json)\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        496,
+        -304
+      ],
+      "id": "55ee3890-9490-4e10-9a7a-79538bee55ad",
+      "name": "Add Issue to DQ table",
+      "credentials": {
+        "postgres": {
+          "id": "0sWI5TG8R6n00crB",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO data_quality_issues (issue_type, details)\nVALUES (\n  'SUSPICIOUS_PAYMENT',\n  to_jsonb('{{ $json | json }}'::json)\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        496,
+        -80
+      ],
+      "id": "aa1167c9-59bc-49b7-a6b9-358eead653ad",
+      "name": "Insert Sus Email to DQ",
+      "credentials": {
+        "postgres": {
+          "id": "0sWI5TG8R6n00crB",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COUNT(*) AS issue_count\nFROM payment\nWHERE amount <= 0\n   OR amount > 100;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        704,
+        -80
+      ],
+      "id": "89acd4a2-ec84-4482-8b1f-127641b54bf4",
+      "name": "Count Issue :Payment",
+      "credentials": {
+        "postgres": {
+          "id": "0sWI5TG8R6n00crB",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COUNT(*) AS issue_count\nFROM customer\nWHERE email IS NULL OR email = '';\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        704,
+        -304
+      ],
+      "id": "3bbc4a8f-6686-4d99-8a86-dbd2b8db6732",
+      "name": "Count Issue 1:Email",
+      "credentials": {
+        "postgres": {
+          "id": "0sWI5TG8R6n00crB",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c11c00d4-6663-4fcf-b9d8-5d90da60a7d8",
+              "leftValue": "={{ $json.issue_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            },
+            {
+              "id": "1d5e0a87-b428-4662-8ff4-4d0506320b67",
+              "leftValue": "={{ $json.issue_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        944,
+        -176
+      ],
+      "id": "3495a814-2c64-4793-b317-042a2b6abd07",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "sendTo": "testingsel2025@gmail.com",
+        "subject": "DQ report ",
+        "message": "=Here are the number of issues noted :  {{ $json.issue_count }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1152,
+        -272
+      ],
+      "id": "7fd2a1fe-57d9-4b8c-ab40-c559ddcd4847",
+      "name": "Send a message",
+      "webhookId": "4d02efba-7faf-4e57-ba03-df58f7b49db8",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "g7wlF9ZAYxweQDkq",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  id,\n  issue_type,\n  details,\n  detected_at\nFROM data_quality_issues\nWHERE detected_at > NOW() - INTERVAL '1 day'\nORDER BY detected_at DESC\nLIMIT 200;\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -336,
+        144
+      ],
+      "id": "2976f722-970b-4b6a-adb7-54a64d9f9f53",
+      "name": "Get Recent DQ Issues",
+      "credentials": {
+        "postgres": {
+          "id": "0sWI5TG8R6n00crB",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"llama3\",\n  \"stream\": false,\n  \"prompt\": \"You are a data quality assistant.\\nGiven the following JSON array of data quality issues from a data warehouse, do all of the following:\\n1. Group issues by issue_type and show counts.\\n2. Highlight the 5 most serious example records (include customer_id/payment info if present).\\n3. Describe the overall health in 3-5 bullet points.\\n4. Suggest 3 concrete next steps for the data engineering team.\\n\\nHere are the issues:\\n\\n{{ JSON.stringify($json).replace(/\\\"/g, '\\\\\\\"') }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -128,
+        144
+      ],
+      "id": "f1915dfc-56ac-461e-b44f-c8f506b1e8a3",
+      "name": "AI Summarize Issues"
+    },
+    {
+      "parameters": {
+        "sendTo": "testingsel2025@gmail.com",
+        "subject": "Daily Data Quality Summary – Pagila",
+        "message": "=Daily Data Quality Summary – Pagila",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        64,
+        144
+      ],
+      "id": "4edbacbd-4809-48d9-8dc0-e88a94ca6549",
+      "name": "Email DQ Summary",
+      "webhookId": "4d02efba-7faf-4e57-ba03-df58f7b49db8",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "g7wlF9ZAYxweQDkq",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Recent DQ Issues",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DQ – Missing Emails": {
+      "main": [
+        [
+          {
+            "node": "Add Issue to DQ table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract": {
+      "main": [
+        [
+          {
+            "node": "Load",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load": {
+      "main": [
+        [
+          {
+            "node": "DQ – Missing Emails",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "DQ – Suspicious Payments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DQ – Suspicious Payments": {
+      "main": [
+        [
+          {
+            "node": "Insert Sus Email to DQ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add Issue to DQ table": {
+      "main": [
+        [
+          {
+            "node": "Count Issue 1:Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Sus Email to DQ": {
+      "main": [
+        [
+          {
+            "node": "Count Issue :Payment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Count Issue 1:Email": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Count Issue :Payment": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message": {
+      "main": [
+        []
+      ]
+    },
+    "Get Recent DQ Issues": {
+      "main": [
+        [
+          {
+            "node": "AI Summarize Issues",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Summarize Issues": {
+      "main": [
+        [
+          {
+            "node": "Email DQ Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "62184f26-c1bc-4d81-b1b9-12451327ae74",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "6302bda9f0113c6aa94966855218e45ac76850be416736450302374fbc7a4246"
+  },
+  "id": "rnHeeTdLYaQLWlbG",
+  "tags": []
+}
