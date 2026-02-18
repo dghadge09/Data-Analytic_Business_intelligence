@@ -1,0 +1,175 @@
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    DATA QUALITY MONITORING WORKFLOW                         │
+│                          (n8n Automation)                                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+                              ┌──────────────────┐
+                              │ Schedule Trigger │
+                              │  (Every 4 hours) │
+                              └────────┬─────────┘
+                                       │
+                    ┌──────────────────┴──────────────────┐
+                    │                                     │
+                    ▼                                     ▼
+          ┌─────────────────────┐            ┌──────────────────────┐
+          │   Extract Node      │            │ Get Recent DQ Issues │
+          │  (Query Customer    │            │  (Last 24 hours)     │
+          │  Revenue Summary)   │            └──────────┬───────────┘
+          └────────┬────────────┘                       │
+                   │                                    ▼
+                   ▼                          ┌──────────────────────┐
+          ┌─────────────────────┐            │ AI Summarize Issues  │
+          │   Load Node         │            │  (Ollama/Llama3)     │
+          │ (Insert into        │            └──────────┬───────────┘
+          │  customer_revenue_  │                       │
+          │  summary table)     │                       ▼
+          └────────┬────────────┘            ┌──────────────────────┐
+                   │                         │ Email DQ Summary     │
+        ┌──────────┴──────────┐              │  (Gmail)             │
+        │                     │              └──────────────────────┘
+        ▼                     ▼
+��──────────────────┐  ┌──────────────────────┐
+│ DQ – Missing     │  │ DQ – Suspicious      │
+│ Emails           │  │ Payments             │
+│ (Query customers │  │ (Query suspicious    │
+│  with NULL/empty │  │  amount transactions)│
+│  email)          │  └──────────┬───────────┘
+└────────┬─────────┘             │
+         │                       ▼
+         ▼                ┌──────────────────────┐
+┌──────────────────┐     │ Insert Sus Email     │
+│ Add Issue to     │     │ to DQ                │
+│ DQ table         │     └──────────┬───────────┘
+│ (MISSING_EMAIL)  │                │
+└────────┬─────────┘                ▼
+         │                 ┌──────────────────────┐
+         ▼                 │ Count Issue:Payment  │
+┌──────────────────┐       │ (Suspicious)         │
+│ Count Issue 1:   │       └──────────┬───────────┘
+│ Email            │                  │
+└────────┬─────────┘                  │
+         │              ┌─────────────┘
+         │              │
+         └──────┬───────┘
+                ▼
+        ┌──────────────────┐
+        │    If Condition  │
+        │  (issue_count>0) │
+        └────────┬─────────┘
+                 │
+                 ▼
+        ┌──────────────────┐
+        │ Send Email Alert │
+        │  (Gmail)         │
+        │ "DQ report"      │
+        └──────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                            DATA FLOW SUMMARY
+═══════════════════════════════════════════════════════════════════════════════
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         POSTGRESQL DATABASE                                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────────────┐  │
+│  │   PAYMENT    │  │   CUSTOMER   │  │ DATA_QUALITY_ISSUES            │  │
+│  ├──────────────┤  ├──────────────┤  ├────────────────────────────────┤  │
+│  │payment_id    │  │customer_id   │  │id                              │  │
+│  │customer_id   │  │first_name    │  │issue_type (MISSING_EMAIL,      │  │
+│  │amount        │  │last_name     │  │           SUSPICIOUS_PAYMENT)  │  │
+│  │payment_date  │  │email         │  │details (JSON)                  │  │
+│  └──────────────┘  └──────────────┘  │detected_at                     │  │
+│                                       └────────────────────────────────┘  │
+│  ┌──────────────────��───────────────┐                                     │
+│  │ CUSTOMER_REVENUE_SUMMARY         │                                     │
+│  ├──────────────────────────────────┤                                     │
+│  │customer_id                       │                                     │
+│  │full_name                         │                                     │
+│  │total_payments                    │                                     │
+│  │last_updated                      │                                     │
+│  └──────────────────────────────────┘                                     │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                         KEY VALIDATIONS & RULES
+═══════════════════════════════════════════════════════════════════════════════
+
+1. MISSING EMAILS CHECK
+   └─ Detects: customer records with NULL or empty email addresses
+   └─ Action: Logs to data_quality_issues table with type 'MISSING_EMAIL'
+
+2. SUSPICIOUS PAYMENTS CHECK
+   └─ Detects: payments with amount <= 0 OR amount > 100
+   └─ Action: Logs to data_quality_issues table with type 'SUSPICIOUS_PAYMENT'
+
+3. CONDITIONAL ALERTING
+   └─ IF: issue_count > 0 (for either validation)
+   └─ THEN: Send email alert via Gmail with issue count
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                         EXTERNAL INTEGRATIONS
+═══════════════════════════════════════════════════════════════════════════════
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                                                             │
+│  ┌─────────────────┐    ┌─────────────────┐    ┌──────────────────────┐  │
+│  │  PostgreSQL     │    │  Gmail (SMTP)   │    │  Ollama (LLM API)    │  │
+│  │  (Port 5432)    │    │  (OAuth2)       │    │  (Port 11434)        │  │
+│  │  - Credentials: │    │  - Email Alerts │    │  - Model: llama3     │  │
+│  │    ID: 0sWI5... │    │  - Credential   │    │  - AI summarization  │  │
+│  │                 │    │    ID: g7wlF... │    │  - Prompt: DQ assist │  │
+│  └─────────────────┘    └─────────────────┘    └──────────────────────┘  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                           WORKFLOW EXECUTION FLOW
+═══════════════════════════════════════════════════════════════════════════════
+
+TRIGGER PATH 1: ETL & Data Quality Check (Main Branch)
+─────────────────────────────────────────────────────────
+Schedule Trigger (Every 4 hours)
+         ↓
+    Extract (Customer Revenue Summary)
+         ↓
+    Load (Insert into Summary Table)
+         ↓
+    ├─→ DQ – Missing Emails
+    │        ↓
+    │   Add Issue to DQ table
+    │        ↓
+    │   Count Issue 1:Email
+    │        ↓
+    │   If (issue_count > 0?)
+    │        ↓
+    │   Send Email Alert
+    │
+    └─→ DQ – Suspicious Payments
+             ↓
+        Insert Sus Email to DQ
+             ↓
+        Count Issue:Payment
+             ↓
+        If (issue_count > 0?)
+             ↓
+        Send Email Alert
+
+
+TRIGGER PATH 2: Daily DQ Summary & AI Analysis (Secondary Branch)
+──────────────────────────────────────────────────────────────────
+Schedule Trigger (Every 4 hours)
+         ↓
+Get Recent DQ Issues (Last 24 hours)
+         ↓
+AI Summarize Issues (Ollama/Llama3 Processing)
+         ↓
+Email DQ Summary (Send AI-generated summary)
+
+
+═══════════════════════════════════════════════════════════════════════════════
